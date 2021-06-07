@@ -14,20 +14,28 @@ pub contract Auction {
         pub let CuratorVaultCap : Capability<&Kibble.Vault{FungibleToken.Receiver}>?
         pub var escrow : {UInt64 : UInt64}
 
+        pub fun approveAuction () {
+            // Checks basic conditions and then calls startAuction()
+            AuctionStatus.approved = true;
+            self.startAuction()
+        }
+
+        pub fun startAuction () : bool {
+            // calls Cutator.deposit()
+            AuctionItem.numberOfBids = 0
+            self.deposit()
+        }
+
+        pub fun cancelAuction () : @KittyItems.Collection {
+            // calss Curator.withdraw() and returns the KittyItem
+            self.withdraw()
+        }
+
         /* 
         pub fun withdrawFromEscrow (ItemID : UInt64) : @KittyItems.Collection {
         }
         pub fun depositToEscrow (Item : @KittyItems.Collection) {
             self.numOfItems = self.numOfItems + 1
-        }
-        pub fun approveAuction () : bool {
-            // Checks basic conditions and then calls startAuction()
-        }
-        pub fun startAuction () : bool {
-            // calls Cutator.deposit()
-        }
-        pub fun cancelAuction () : @KittyItems.Collection {
-            // calss Curator.withdraw() and returns the KittyItem
         }
         */
 
@@ -40,6 +48,7 @@ pub contract Auction {
     }
 
     pub resource AuctionItem {
+        pub var tokenID : UInt256
         access(self) var numberOfBids: UInt64
         access(self) var NFT: @KittyItems.NFT?
         pub let auctionID : UInt64
@@ -54,10 +63,12 @@ pub contract Auction {
         access(self) var recipientVaultCap: Capability<&{FungibleToken.Receiver}>?
         access(self) let ownerCollectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>
         access(self) let ownerVaultCap: Capability<&{FungibleToken.Receiver}>
+        pub var curatorFeePercentage : UInt64
+        pub var curatorAdd : Address
 
         init (NFT: @KittyItems.NFT?, reservePrice: UFix64, auctionStartTime: UFix64, minimumBidIncrement: UFix64, 
         duration: UFix64, ownerCollectionCap: Capability<&KittyItems.Collection>, 
-        ownerVaultCap: Capability<&Kibble.Vault>) {
+        ownerVaultCap: Capability<&Kibble.Vault>, curatorFeePercentage : uint8) {
             self.numberOfBids = (0 as UInt64) 
             self.NFT <- NFT
             Auction.totalAuctions = Auction.totalAuctions + (1 as UInt64)
@@ -72,11 +83,12 @@ pub contract Auction {
             self.recipientVaultCap = nil
             self.ownerCollectionCap = ownerCollectionCap
             self.ownerVaultCap = ownerVaultCap
+            self.curatorFeePercentage = curatorFeePercentage
             //self.auctionStatus = {}
         }
 
-        pub fun isAuctionExpired(): Bool {
-            return AuctionStatus.active
+        pub fun isAuctionExpired() : Bool {
+            return !AuctionStatus.active
         }
 
         pub fun minNextBid() :UFix64 {
@@ -88,8 +100,31 @@ pub contract Auction {
         }
 
         pub fun timeRemaining() : Fix64 {
-            return 
+            return Fix64(self.duration) - Fix64(getCurrentBlock.timestamp())
         }
+
+        pub fun bidder() : Address? {
+            if let vaultCap = self.recipientVaultCap {
+                return vaultCap.borrow()!.owner!.address
+            }
+            return nil
+        }
+
+        // placeBid sends the bidder's tokens to the bid vault and updates the
+        // currentPrice of the current auction item
+        pub fun placeBid(id: UInt64, bidTokens: @FungibleToken.Vault, vaultCap: Capability<&{FungibleToken.Receiver}>,  
+        collectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>) {
+            pre {
+                self.auctionItems[id] != nil:
+                "Auction does not exist in this drop"
+        }
+
+        // Get the auction item resources
+        let itemRef = &self.auctionItems[id] as &AuctionItem
+        itemRef.placeBid(bidTokens: <- bidTokens, 
+        vaultCap:vaultCap, 
+        collectionCap:collectionCap)
+    }
 
         /*
         access(contract) fun sendNFT(_ capability: Capability<&{KittyItems.KittyItemsCollectionPublic}>)
@@ -97,11 +132,7 @@ pub contract Auction {
         pub fun releasePreviousBid()
         pub fun settleAuction(cutPercentage: UFix64, cutVault:Capability<&{FungibleToken.Receiver}> )
         pub fun returnAuctionItemToOwner()
-        
-        pub fun bidder() : Address?
         pub fun currentBidForUser(address:Address): UFix64
-        pub fun placeBid(bidTokens: @FungibleToken.Vault, vaultCap: Capability<&{FungibleToken.Receiver}>, 
-        collectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>)
         pub fun getAuctionStatus() : AuctionStatus
         */
 
@@ -150,6 +181,55 @@ pub contract Auction {
 
     init () {
         self.totalAuctions = (0 as UInt64)
+    }
+
+    pub fun createAuction (token: @KittyItems.NFT, minimumBidIncrement: UFix64, duration: UFix64, auctionStartTime: UFix64,
+    startPrice: UFix64, collectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>, 
+    vaultCap: Capability<&{FungibleToken.Receiver}>) {
+
+        // create a new auction items resource container
+            let item <- Auction.createStandaloneAuction(
+                token: <-token,
+                minimumBidIncrement: minimumBidIncrement,
+                auctionLength: auctionLength,
+                auctionStartTime: auctionStartTime,
+                startPrice: startPrice,
+                collectionCap: collectionCap,
+                vaultCap: vaultCap
+            )
+
+            let id = item.auctionID
+
+            // update the auction items dictionary with the new resources
+            let oldItem <- self.auctionItems[id] <- item
+            destroy oldItem
+
+            let owner= vaultCap.borrow()!.owner!.address
+            // emit Created(tokenID: id, owner: owner, startPrice: startPrice, startTime: auctionStartTime)
+
+    }
+
+    //this method is used to create a standalone auction that is not part of a collection
+    //we use this to create the unique part of the Versus contract
+    pub fun createStandaloneAuction(
+        token: @KittyItems.NFT, 
+        minimumBidIncrement: UFix64, 
+        auctionLength: UFix64,
+        auctionStartTime: UFix64,
+        startPrice: UFix64, 
+        collectionCap: Capability<&{Art.CollectionPublic}>, 
+        vaultCap: Capability<&{FungibleToken.Receiver}>) : @AuctionItem {
+            
+        // create a new auction items resource container
+        return  <- create AuctionItem(
+            NFT: <-token,
+            minimumBidIncrement: minimumBidIncrement,
+            auctionStartTime: auctionStartTime,
+            startPrice: startPrice,
+            auctionLength: auctionLength,
+            ownerCollectionCap: collectionCap,
+            ownerVaultCap: vaultCap
+        )
     }
 }
 
