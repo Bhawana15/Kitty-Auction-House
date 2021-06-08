@@ -4,17 +4,41 @@
     </a>
 </p>
 
-👋 Welcome! This demo app was created to help you learn how to build on Flow.
+👋 Welcome! This is an Auction House for Kitty Items NFT Marketplace.
 
-- Kitty Items is a **complete NFT marketplace** built with [Cadence](https://docs.onflow.org/cadence), Flow's resource-oriented smart contract programming language.
-- Learn how to deploy contracts, mint NFTs, and integrate user wallets with the Flow Client Library (FCL).
+- Kitty Auction House is a **complete NFT marketplace & auction house** built with [Cadence](https://docs.onflow.org/cadence), Flow's resource-oriented smart contract programming language.
 
-## 🎬 Live Demo
+## 😺 What are Kitty Items?
 
-Check out the [live demo of Kitty Items](http://kitty-items-flow-testnet.herokuapp.com/),
-deployed on the Flow Testnet.
+Items are hats for your cats, but under the hood they're [non-fungible tokens (NFTs)](https://github.com/onflow/flow-nft) stored on the Flow blockchain.
 
-If you'd like to deploy your own version, see the [deploy to Heroku](#optional-heroku-deployment) instructions near the bottom to this setup guide.
+Items can be purchased from the marketplace with fungible tokens.
+In the future you'll be able to add them to [Ethereum CryptoKitties](https://www.cryptokitties.co/) with ownership validated by an oracle.
+
+## What is Kitty Auction House?
+The Kitty Auction House is an open and permissionless system that allows any creator, community, platform or DAO to create and run their own curated auction houses.
+
+These auction houses run reserve timed auctions for NFTs, with special emphasis given to the role of curators. If an owner of an NFT chooses to list with a curator, that curator can charge a curator fee and has to approve any auction before it commences with that curators auction house.
+
+Anyone is able to run an NFT auction on the protocol for free by simply not specifying a curator.
+
+## Architecture
+Architecture
+This protocol allows a holder of any NFT to create and perform a permissionless reserve auction. It also acknowledges the role of curators in auctions, and optionally allows the auction creator to dedicate a portion of the winnings from the auction to a curator of their choice.
+
+Note that if a curator is specified, the curator decides when to start the auction. Additionally, the curator is able to cancel an auction before it begins.
+
+## Curators
+In a metaverse of millions of NFTs, the act of curation is critical. Curators create and facilitate context and community which augment the value of NFTs that they select. The act of curation creates value for the NFT by contextualizing it and signalling its importance to a particular community. The act of curation is extremely valuable, and is directly recognized by the Auction House system. A curator who successfully auctions off an NFT for an owner can earn a share in the sale.
+
+We have defined a curator role in the auction house. A curator can:
+
+Approve and deny proposals for an NFT to be listed with them.
+Earn a fee for their curation
+Cancel an auction prior to bidding being commenced
+Creators and collectors can submit a proposal to list their NFTs with a curator onchain, which the curator must accept (or optionally reject). This creates an onchain record of a curators activity and value creation.
+
+Creators and collectors always have the option to run an auction themselves for free.
 
 ## ✨ Getting Started
 
@@ -99,38 +123,6 @@ REACT_APP_CONTRACT_KIBBLE
 REACT_APP_CONTRACT_KITTY_ITEMS
 REACT_APP_CONTRACT_KITTY_ITEMS_MARKET
 ```
-
-## Project Overview
-
-![Project Overview](kitty-items-diagram.png)
-
-## 🔎 Legend
-
-Above is a basic diagram of the parts of this project contained in each folder, and how each part interacts with the others.
-
-### 1. Web App (Static website) | [kitty-items/web](https://github.com/onflow/kitty-items/tree/master/web)
-
-A true dapp, client-only web app. This is a complete web application built with React that demonstrates how to build a static website that can be deployed to an environment like IPFS and connects directly to the Flow blockchain using `@onflow/fcl`. No servers required. `@onflow/fcl` handles authentication and authorization of [Flow accounts](https://docs.onflow.org/concepts/accounts-and-keys/), [signing transactions](https://docs.onflow.org/concepts/transaction-signing/), and querying data using using Cadence scripts.
-
-### 2. Look Ma, a Web Server! | [kitty-items/api](https://github.com/onflow/kitty-items/tree/master/api)
-
-We love decentralization, but servers are still very useful, and this one's no exception. The code in this project demonstrates how to connect to Flow using [Flow JavaScript SDK](https://github.com/onflow/flow-js-sdk) from a Node JS backend. It's also chalk-full of handy patterns you'll probably want to use for more complex and feature-rich blockchain applications, like storing and querying events using a SQL database (Postgres). The API demonstrates how to send transactions to the Flow Blockchain, specifically for minting [Kibbles](https://github.com/onflow/kitty-items/blob/master/cadence/contracts/Kibble.cdc) (fungible tokens) and [Kitty Items](https://github.com/onflow/kitty-items/blob/master/cadence/contracts/KittyItems.cdc) (non-fungible tokens).
-
-### 3. Cadence Code | [kitty-items/cadence](https://github.com/onflow/kitty-items/tree/master/cadence)
-
-[Cadence](https://docs.onflow.org/cadence) smart contracts, scripts & transactions for your viewing pleasure. This folder contains all of the blockchain logic for the marketplace application. Here you will find examples of [fungible token](https://github.com/onflow/flow-ft) and [non-fungible token (NFT)](https://github.com/onflow/flow-nft) smart contract implementations, as well as the scripts and transactions that interact with them. It also contains examples of how to _test_ your Cadence code (tests written in Golang).
-
-## 😺 What are Kitty Items?
-
-Items are hats for your cats, but under the hood they're [non-fungible tokens (NFTs)](https://github.com/onflow/flow-nft) stored on the Flow blockchain.
-
-Items can be purchased from the marketplace with fungible tokens.
-In the future you'll be able to add them to [Ethereum CryptoKitties](https://www.cryptokitties.co/) with ownership validated by an oracle.
-
-## ❓ More Questions?
-
-- Chat with the team on the [Flow Discord server](https://discord.gg/xUdZxs82Rz)
-- Ask questions on the [Flow community forum](https://forum.onflow.org/t/kitty-items-marketplace-demo-dapp/759/5)
 
 ---
 
