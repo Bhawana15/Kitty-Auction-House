@@ -442,11 +442,13 @@ pub contract Auction {
         )
     }
 
+    /*
     // Creates new Curator
     pub fun createCurator () : @Curator {
 
     }
-
+    */ 
+    
     init () {
         self.totalAuctions = (0 as UInt64)
         self.totalCurators = (0 as UInt64)
