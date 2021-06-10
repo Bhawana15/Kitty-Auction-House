@@ -7,15 +7,153 @@ import KittyItems from 0x4fc019cea9fc4817
 pub contract Auction {
     
     pub var totalAuctions : UInt64
+    pub var totalCurators : UInt64
 
-    // EVENTS : WRITE HERE
-    // pub event newAuctionCreated (auctionID, NFT_ID, Curator_ID, ownerAddress)
-    // pub event auctionSettled(auctionID, NFT_ID, Curator_ID, oldOwnerAddress, winnerAddress)
-    // pub event auctionCancelled(auctionID, NFT_ID, Curator_ID, ownerAddress)
+    // Need to give auctionID also in abouve two events
+    pub event auction_request_approved (tokenID: UInt64, owner: Address, startPrice: UFix64, startTime: UFix64)
+    pub event auction_created_and_started (tokenID: UInt64, owner: Address, startPrice: UFix64, startTime: UFix64)
+    pub event auction_ended_and_settled (auctionID, tokenID, Curator_ID, oldOwnerAddress, winnerAddress)
+    pub event auction_cancelled (auctionID, tokenID, Curator_ID, ownerAddress)
 
+    pub resource Curator {
+
+        pub let curatorAddress : Address?
+        pub let curatorID : UInt64
+        pub var totalNFTs : UInt64
+
+        // To store bidding amount during each bid
+        pub var bidVault : @Kibble.Vault
+        
+        // To store Curator's earned money after the auction
+        pub var curatorVault : @Kibble.Vault
+
+        // To store the NFTs for Auction
+        pub var NFTCollection : @KittyItems.Collection
+
+        access(self) let ownerCollectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>
+        access(self) let ownerVaultCap: Capability<&{FungibleToken.Receiver}>
+
+        // Checks basic conditions to approve the auction
+        pub fun approveAuction (
+            ownerCollectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>, 
+            ownerAddress: Address?,
+            tokenID : UInt64, 
+            startTime : Fix64, 
+            endTime : Fix64
+        ) : bool {
+            self.ownerCollectionCap = ownerCollectionCap
+            let ownerCollection = self.ownerCollectionCap.borrow()
+            if (startTime < endTime && ownerAddress && ownerCollection.ownedNFTs[tokenID] != nil) {
+                AuctionStatus.approved = true;
+                AuctionStatus.itemOwner = ownerAddress
+
+                emit auction_request_approved (tokenID: UInt64, owner: Address, startPrice: UFix64, startTime: UFix64)
+
+                return true
+            }
+            return false
+        }
+
+        pub fun startAuction (
+            ownerVaultCap: Capability<&{FungibleToken.Receiver}>, 
+            tokenID : UInt64, 
+            ownerAddress: Address?, 
+            startTime : Fix64, 
+            endTime : Fix64
+        ) {
+            self.totalNFTs = self.totalNFTs + (1 as UInt64)
+            self.tokenID = tokenID
+            let token <- self.ownerCollectionCap.borrow().ownedNFTs[ID]
+            self.NFTCollection.deposit(token: <- token)
+            pub var newAuction <- createNewAuction (
+                tokenID : UInt64, 
+                ownerAddress: Address, 
+                startTime : Fix64, 
+                endTime : Fix64
+            )
+
+            emit auction_created_and_started (tokenID: UInt64, owner: Address, startPrice: UFix64, startTime: UFix64)
+        }
+
+        // sendNFT sends the NFT-token to the Collection belonging to the provided Capability
+        pub fun sendNFT(capability: Capability<&{NonFungibleToken.CollectionPublic}>) {
+            // borrow a reference to the owner's NFT receiver
+            if let collectionRef = capability.borrow() {
+                let NFT <- self.withdrawNFT()
+                // deposit the token into the owner's collection
+                collectionRef.deposit(token: <-NFT)
+            } else {
+                log(" unable to borrow collection ref")   
+            }
+        }
+
+        // sendBidTokens sends the bid tokens to the Vault Receiver belonging to the provided Capability
+        pub fun refundBid(capability: Capability<&{FungibleToken.Receiver}>) {
+            // borrow a reference to the owner's NFT receiver
+            if let vaultRef = capability.borrow() {
+                let bidVaultRef = &self.bidVault as &FungibleToken.Vault
+                vaultRef.deposit(from: <-bidVaultRef.withdraw(amount: bidVaultRef.balance))
+            } else {
+                    log("sendBidTokens(): couldn't get vault ref")    
+            }
+        }
+
+        //Write this function later - It will deposit the curatorFee to curatorVault and do final changes
+        pub fun endCompletedAuction (
+            bidderAddress: Address?, 
+            ownerAddress: Address?, 
+            curatorFee: UInt256, 
+            curatorAddress: Address?, 
+            curatorID: UInt64
+        ) {
+            self.curatorVault.deposit(curatorFee)
+            self.itemOwner = bidderAddress
+        }
+
+        // Doubt : the withdrawn NFT is returned, but not stored in the owner's NFTCollection
+        pub fun cancelAuction (
+            auctionID: UInt256, 
+            tokenID: UInt64, 
+            ownerAddress: Address?
+        ) : @KittyItems.NFT {
+            self.totalNFTs = self.totalNFTs - (1 as UInt64)
+            AuctionStatus.timeRemaining = (0 as Fix64)
+            AuctionStatus.active = false
+            AuctionStatus.cancelled = true
+            AuctionStatus.expired = true
+            totalAuctions = totalAuctions - (1 as UInt64)
+
+            emit auction_cancelled (auctionID, tokenID, Curator_ID, ownerAddress)
+
+            return <- self.KittyItems.NFT.withdraw(tokenID)
+        }
+
+        init (
+            curatorAddress : Address?, 
+            curatorID : UInt64
+        ) {
+            self.curatorAddress = curatorAddress
+            self.curatorID = curatorID
+            self.totalNFTs = (0 as UInt64)
+            self.bidVault <- Kibble.createEmptyVault()
+            self.curatorVault <- Kibble.createEmptyVault()
+            self.NFTCollection <- KittyItems.createEmptyCollection()
+            self.ownerCollectionCap = nil
+            self.ownerVaultCap = nil
+        }
+
+        destroy () {
+            log("destroy auction")
+            // send the NFT back to auction owner
+            // if there's a bidder...
+            destroy self.bidVault
+        }
+    }
+
+    
     pub struct AuctionStatus {
         pub let itemOwner: Address?
-        pub let NFT_ID: UInt64?
+        pub let tokenID: UInt64?
         pub var auctionID : UInt256
         pub let currentBidAmount : UFix64 
         pub let bidIncrement : UFix64
@@ -35,7 +173,7 @@ pub contract Auction {
 
         init(
             itemOwner : Address?, 
-            NFT_ID: UInt64?, 
+            tokenID: UInt64?, 
             auctionID : UInt256,
             currentBidAmount : UFix64,  
             bidIncrement : UFix64, 
@@ -45,7 +183,7 @@ pub contract Auction {
             minimumBidIncrement : UInt64
         ) {
             self.itemOwner = itemOwner
-            self.NFT_ID = NFT_ID
+            self.tokenID = tokenID
             self.auctionID = auctionID
             self.currentBidAmount = currentBidAmount
             self.bidIncrement = bidIncrement
@@ -63,7 +201,7 @@ pub contract Auction {
 
     pub resource AuctionItem {
 
-        pub var NFT_ID : UInt256
+        pub var tokenID : UInt256
         access(self) var numberOfBids: UInt64
         access(self) var NFT: @KittyItems.NFT?
         pub let auctionID : UInt64
@@ -75,8 +213,8 @@ pub contract Auction {
         priv var currentPrice: UFix64 
         access(self) var recipientCollectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>?
         access(self) var recipientVaultCap: Capability<&{FungibleToken.Receiver}>?
-        access(self) let ownerCollectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>
-        access(self) let ownerVaultCap: Capability<&{FungibleToken.Receiver}>
+        access(self) let curatorCollectionCap: Capability<&{KittyItems.KittyItemsCollectionPublic}>
+        access(self) let curatorVaultCap: Capability<&{FungibleToken.Receiver}>
         pub var curatorFeePercentage : UInt64
         // pub var curatorAdd : Address
 
@@ -106,6 +244,7 @@ pub contract Auction {
             return 0.0
         }
 
+        // Places a new bid during the Auction. It also needs AuctionID
         pub fun placeBid(
             bidTokens: @FungibleToken.Vault, 
             vaultCap: Capability<&{FungibleToken.Receiver}>, 
@@ -118,9 +257,9 @@ pub contract Auction {
 
             let bidderAddress = vaultCap.borrow()!.owner!.address
 
-            let BiddingAmount = bidTokens.balance
+            let biddingAmount = bidTokens.balance
             let minNextBid = self.minNextBid()
-            if BiddingAmount < minNextBid {
+            if biddingAmount < minNextBid {
                 panic("bid amount must be larger or equal to the current price + minimum bid increment "
                 .concat(amountYouAreBidding.toString()).concat(" < ").concat(minNextBid.toString()))
              }
@@ -144,7 +283,7 @@ pub contract Auction {
             self.recipientCollectionCap = collectionCap
             self.numberOfBids=self.numberOfBids+(1 as UInt64)
 
-        //  emit Bid(NFT_ID: self.auctionID, bidderAddress: bidderAddress, bidPrice: self.currentPrice)
+        //  emit Bid(tokenID: self.auctionID, bidderAddress: bidderAddress, bidPrice: self.currentPrice)
         }
 
         pub fun releasePreviousBid() {
@@ -196,8 +335,40 @@ pub contract Auction {
                 expired: self.isAuctionExpired()
             )
         }
+
+        //This method should probably use preconditions more 
+        pub fun settleAuction(cutPercentage: UFix64, cutVault:Capability<&{FungibleToken.Receiver}> )  {
+
+            pre {
+                !self.auctionCompleted : "The auction is already settled"
+                self.NFT != nil: "NFT in auction does not exist"
+                self.isAuctionExpired() : "Auction has not completed yet"
+            }
+
+            // return if there are no bids to settle
+            if self.currentPrice == 0.0{
+                self.returnAuctionItemToOwner()
+                return
+            }            
+
+            //Withdraw cutPercentage to marketplace and put it in their vault
+            let amount=self.currentPrice * cutPercentage
+            let beneficiaryCut <- self.bidVault.withdraw(amount:amount )
+
+            let cutVault=cutVault.borrow()!
+            emit MarketplaceEarned(amount: amount, owner: cutVault.owner!.address)
+            cutVault.deposit(from: <- beneficiaryCut)
+
+            self.sendNFT(self.recipientCollectionCap!)
+            self.sendBidTokens(self.ownerVaultCap)
+
+            self.auctionCompleted = true
+            
+            emit auctionSettled(tokenID: self.auctionID, price: self.currentPrice)
+        }
+        
         init (
-            NFT_ID : UInt256, 
+            tokenID : UInt256, 
             NFT: @KittyItems.NFT?, 
             startPrice: UFix64,  
             auctionStartTime: UFix64, 
@@ -208,7 +379,7 @@ pub contract Auction {
             curatorFeePercentage : UInt64
         ) {
             self.numberOfBids = (0 as UInt64)
-            self.NFT_ID = NFT_ID 
+            self.tokenID = tokenID 
             self.NFT <- NFT
             Auction.totalAuctions = Auction.totalAuctions + (1 as UInt64)
             self.auctionID = Auction.totalAuctions
@@ -226,144 +397,26 @@ pub contract Auction {
         }
     }
 
-
-    pub resource Curator {
-
-        pub let CuratorAddress : Address?
-        pub let CuratorID : UInt64
-        pub var totalNFTs : UInt64
-
-        // To store bidding amount during each bid
-        pub var bidVault : @Kibble.Vault
-        
-        // To store Curator's earned money after the auction
-        pub var curatorVault : @Kibble.Vault
-
-        // To store the NFTs for Auction
-        pub var NFTCollection : @KittyItems.Collection
-
-        // Checks basic conditions and then calls startAuction()
-        pub fun approveAuction (
-            NFT : @KittyItems.NFT, 
-            ownerAddress: Address?, 
-            startTime : Fix64, 
-            endTime : Fix64
-        ) : bool {
-            if (startTime < endTime && ownerAddress) {
-                AuctionStatus.approved = true;
-                AuctionStatus.itemOwner = ownerAddress
-                self.startAuction(token: <- NFT, ownerAddress: Address?, startTime : Fix64, endTime : Fix64)
-                return true;
-            }
-            else {
-                // self.cancelAuction(auctionID: UInt256, token: <- NFT, ownerAddress: Address?);
-                return false;
-            }
-        }
-
-        pub fun startAuction (
-            NFT : @KittyItems.NFT, 
-            ownerAddress: Address?, 
-            startTime : Fix64, 
-            endTime : Fix64
-        ) : bool {
-            self.totalNFTs = self.totalNFTs + (1 as UInt64)
-            pub let NFT_ID = self.totalNFTs
-            self.NFTCollection.deposit(token: <- NFT)
-            pub var newAuction <- createNewAuction (
-                NFT_ID : UInt64, 
-                ownerAddress: Address, 
-                startTime : Fix64, 
-                endTime : Fix64
-            )
-        }
-
-        // Doubt : the withdrawn NFT is returned, but not stored in the owner's NFTCollection
-        pub fun cancelAuction (
-            auctionID: UInt256, 
-            NFT_ID: UInt64, 
-            ownerAddress: Address?
-        ) : @KittyItems.NFT {
-            self.totalNFTs = self.totalNFTs - (1 as UInt64)
-            AuctionStatus.timeRemaining = (0 as Fix64)
-            AuctionStatus.active = false
-            AuctionStatus.cancelled = true
-            AuctionStatus.expired = true
-            totalAuctions = totalAuctions - (1 as UInt64)
-            return <- self.KittyItems.NFT.withdraw(NFT_ID)
-        }
-
-        //Write this function later - It will deposit the curatorFee to curatorVault and do final changes
-        pub fun endCompletedAuction (
-            bidderAddress: Address?, 
-            ownerAddress: Address?, 
-            curatorFee: UInt256, 
-            CuratorAddress: Address?, 
-            curatorId: UInt64
-        ) {
-            self.curatorVault.deposit(curatorFee)
-            self.itemOwner = bidderAddress
-        }
-
-        // sendNFT sends the NFT to the Collection belonging to the provided Capability
-        pub fun sendNFT(capability: Capability<&{NonFungibleToken.CollectionPublic}>) {
-            // borrow a reference to the owner's NFT receiver
-            if let collectionRef = capability.borrow() {
-                let NFT <- self.withdrawNFT()
-                // deposit the token into the owner's collection
-                collectionRef.deposit(token: <-NFT)
-            } else {
-                log(" unable to borrow collection ref")   
-            }
-        }
-
-        // sendBidTokens sends the bid tokens to the Vault Receiver belonging to the provided Capability
-        pub fun refundBid(capability: Capability<&{FungibleToken.Receiver}>) {
-            // borrow a reference to the owner's NFT receiver
-            if let vaultRef = capability.borrow() {
-                let bidVaultRef = &self.bidVault as &FungibleToken.Vault
-                vaultRef.deposit(from: <-bidVaultRef.withdraw(amount: bidVaultRef.balance))
-            } else {
-                    log("sendBidTokens(): couldn't get vault ref")    
-            }
-        }
-
-        init (
-            CuratorAddress : Address?, 
-            CuratorID : UInt64
-        ) {
-            self.CuratorAddress = CuratorAddress
-            self.CuratorID = CuratorID
-            self.totalNFTs = (0 as UInt64)
-            self.bidVault <- Kibble.createEmptyVault()
-            self.curatorVault <- Kibble.createEmptyVault()
-            self.NFTCollection <- KittyItems.createEmptyCollection()
-        }
-
-        destroy () {
-            log("destroy auction")
-            // send the NFT back to auction owner
-            // if there's a bidder...
-            destroy self.bidVault
-        }
-    }
-
-
     pub fun createNewAuction (
-        NFT_ID : UInt64, 
+        tokenID : UInt64, 
         ownerAddress: Address?, 
         startTime : Fix64, 
         endTime : Fix64
     ) {
         return <- AuctionItem (
-            NFT_ID : UInt64, 
-            ownerAddress: Address?, 
+            tokenID : UInt64, 
+            ownerAddress: Address, 
             startTime : Fix64, 
             endTime : Fix64
         )
     }
 
+    pub fun createCurator () : @Curator {
+
+    }
+
     init () {
         self.totalAuctions = (0 as UInt64)
+        self.totalCurators = (0 as UInt64)
     }
 }
