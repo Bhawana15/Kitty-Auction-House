@@ -1,8 +1,3 @@
-// WHAT IS LEFT:
-// Functions : 
-// Variable : AuctionStatus.leader
-// Events : Check again
-
 import FungibleToken from 0x4fc019cea9fc4817
 import NonFungibleToken from 0x4fc019cea9fc4817
 import Kibble from 0x4fc019cea9fc4817
@@ -81,6 +76,26 @@ pub contract Auction {
             emit auction_created_and_started (tokenID: UInt64, owner: Address, startPrice: UFix64, startTime: UFix64)
         }
 
+        // It returns the bid tokens from Curator's bidValut to the provided capability as previous bid is cancelled
+        access(contract) fun returnBidTokens(_ toRecipientcap: Capability<&{FungibleToken.Receiver}>) {
+            // borrow a reference to the owner's NFT receiver
+            if let vaultRef = toRecipientcap.borrow() {
+                let bidVaultRef = &self.bidVault as &FungibleToken.Vault
+                if(bidVaultRef.balance > 0.0) {
+                    vaultRef.deposit(from: <-bidVaultRef.withdraw(amount: bidVaultRef.balance))
+                }
+                return
+            }
+
+            if let ownerRef= self.ownerVaultCap.borrow() {
+                let bidVaultRef = &self.bidVault as &FungibleToken.Vault
+                if(bidVaultRef.balance > 0.0) {
+                    ownerRef.deposit(from: <-bidVaultRef.withdraw(amount: bidVaultRef.balance))
+                }
+                return
+            }
+        }
+
         // Sends NFT token from Curator's NFTCollection to the provided Collection capability
         pub fun sendNFT(collectionCap: Capability<&{NonFungibleToken.CollectionPublic}>) {
             // borrow a reference to the owner's NFT receiver
@@ -99,15 +114,6 @@ pub contract Auction {
             return <- NFT!
         }
 
-        // Returns NFT to the Owner if Auction is cancelled
-        pub fun returnAuctionItemToOwner() {
-            // release the bidder's tokens
-            self.releasePreviousBid() //////// doubt
-
-            // deposit the NFT into the owner's collection
-            self.sendNFT(self.ownerCollectionCap)
-        }
-
         // Ends the auction that has been completed by calling AuctionItem.settleAuction()
         pub fun endCompletedAuction() {   
            AuctionItem.settleAuction(cutPercent : self.curatorPercent)
@@ -124,12 +130,11 @@ pub contract Auction {
         ) : @KittyItems.NFT {
             self.totalNFTs = self.totalNFTs - (1 as UInt64)
             self.totalAuctions = self.totalAuctions - (1 as UInt64)
-            // AuctionStatus.timeRemaining = (0 as Fix64)
-            // AuctionStatus.active = false
-            // AuctionStatus.cancelled = true
-            // AuctionStatus.expired = true
-            
-            AuctionItem.returnAuctionItemToOwner()
+        
+            // deposit the NFT into the owner's collection
+            self.sendNFT(self.ownerCollectionCap)
+
+            self.returnBidTokens(self.ownerVaultCap)
             // AuctionItem.destroy()
 
             emit auction_cancelled (auctionID: UInt64, tokenID: UInt64, curatorID: UInt64, ownerAddress: Address)
@@ -158,52 +163,6 @@ pub contract Auction {
             // send the NFT back to auction owner
             // if there's a bidder...
             destroy self.bidVault
-        }
-    }
-
-    
-    pub struct AuctionStatus {
-        pub let itemOwner: Address?
-        pub let tokenID: UInt64?
-        pub var auctionID : UInt64
-        pub let currentBidAmount : UFix64 
-        pub let bidIncrement : UFix64
-        pub let timeRemaining : Fix64
-        pub var active : Bool
-        pub var cancelled : Bool
-        pub var completed: Bool 
-        pub let startTime : Fix64
-        pub let endTime : Fix64
-        pub let minimumBidIncrement : UInt64
-        // pub var recentBidderID : UInt256
-        // pub let bids : UInt64 // 
-        // pub let metadata: Art.Metadata?
-        
-        // pub let leader: Address?
-
-        init(
-            itemOwner : Address?, 
-            tokenID: UInt64?, 
-            auctionID : UInt64,
-            currentBidAmount : UFix64,  
-            bidIncrement : UFix64, 
-            timeRemaining : Fix64, 
-            endTime : Fix64, 
-            startTime : Fix64, 
-            minimumBidIncrement : UInt64
-        ) {
-            self.itemOwner = itemOwner
-            self.tokenID = tokenID
-            self.auctionID = auctionID
-            self.currentBidAmount = currentBidAmount
-            self.bidIncrement = bidIncrement
-            self.timeRemaining = timeRemaining
-            self.endTime = endTime
-            self.startTime = startTime
-            self.cancelled = false
-            self.active = false
-            self.completed = false
-            self.minimumBidIncrement = minimumBidIncrement
         }
     }
 
@@ -248,25 +207,22 @@ pub contract Auction {
             }
             return AuctionItem.minimumBidIncrement + self.currentPrice
         }
-        
-        // It returns the bid tokens from Curator's bidValut to the provided capability as previous bid is cancelled
-        access(contract) fun returnBidTokens(_ toRecipientcap: Capability<&{FungibleToken.Receiver}>) {
-            // borrow a reference to the owner's NFT receiver
-            if let vaultRef = toRecipientcap.borrow() {
-                let bidVaultRef = &self.bidVault as &FungibleToken.Vault
-                if(bidVaultRef.balance > 0.0) {
-                    vaultRef.deposit(from: <-bidVaultRef.withdraw(amount: bidVaultRef.balance))
-                }
-                return
-            }
 
-            if let ownerRef= self.ownerVaultCap.borrow() {
-                let bidVaultRef = &self.bidVault as &FungibleToken.Vault
-                if(bidVaultRef.balance > 0.0) {
-                    ownerRef.deposit(from: <-bidVaultRef.withdraw(amount: bidVaultRef.balance))
-                }
+        // Returns NFT to the Owner if Auction is cancelled
+        pub fun returnAuctionItemToOwner() {
+            // release the bidder's tokens
+            self.releasePreviousBid() //////// doubt
+
+            // deposit the NFT into the owner's collection
+            Curator.sendNFT(self.ownerCollectionCap)
+        }
+
+        // Returns the bid amount from the Bidder to the Curator
+        pub fun releasePreviousBid() {
+            if let vaultCap = self.recipientVaultCap {
+                Curator.returnBidTokens(self.recipientVaultCap!)
                 return
-            }
+            } 
         }
         
         // Places a new bid during the Auction. 
@@ -313,56 +269,6 @@ pub contract Auction {
             emit new_bid_placed (tokenID: self.auctionID, bidderAddress: bidderAddress, bidPrice: self.currentPrice)
         }
 
-        // Returns the bid amount from the Bidder to the Curator
-        pub fun releasePreviousBid() {
-            if let vaultCap = self.recipientVaultCap {
-                self.returnBidTokens(self.recipientVaultCap!)
-                return
-            } 
-        }
-
-        // Returns whether auction is expired or not
-        pub fun isAuctionExpired() : Bool {
-            let timeRemaining= self.timeRemaining()
-            return AuctionItem.timeRemaining() < Fix64(0.0)
-        }
-
-        // It extends the Length of the Auction
-        pub fun extendWith(_ amount: UFix64) {
-            AuctionItem.auctionLength = AuctionItem.auctionLength + amount
-        }
-
-        // Returns the time remaining for the auction to get completed normally
-        pub fun timeRemaining() : Fix64 {
-            return Fix64(self.auctionLength) - Fix64(getCurrentBlock.timestamp())
-        }
-
-        // Returns the status of this Auction
-        pub fun getAuctionStatus() :AuctionStatus {
-            var leader:Address?= nil
-            if let recipient = self.recipientVaultCap {
-                leader=recipient.borrow()!.owner!.address
-            }
-
-            return AuctionStatus(
-                id:self.auctionID,
-                currentPrice: self.currentPrice, 
-                bids: self.numberOfBids,
-                active: !self.auctionCompleted  && !self.isAuctionExpired(),
-                timeRemaining: self.timeRemaining(),
-                metadata: self.NFT?.metadata,
-                artId: self.NFT?.id,
-                leader: leader,
-                bidIncrement: self.minimumBidIncrement,
-                owner: self.ownerVaultCap.borrow()!.owner!.address,
-                startTime: Fix64(self.startTime),
-                endTime: Fix64(self.startTime+self.auctionLength),
-                minNextBid: self.minNextBid(),
-                completed: self.auctionCompleted,
-                expired: self.isAuctionExpired()
-            )
-        }
-
         // Settles the auction 
         /* Withdraws curatorPercent amount from Curator.bidVault and transfers it to Curator.curatorVault.
         Also calls Curator.sendNFT() which Sends NFT token from Curator's NFTCollection to the provided Collection 
@@ -379,7 +285,8 @@ pub contract Auction {
             if self.currentPrice == 0.0{
                 self.returnAuctionItemToOwner() // we dont have owner, we have curator
                 return
-            }            
+            }
+
             let bidVaultRef = &Curator.bidVault as &kibble.Vault
             let curatorVaultRef = &Curator.curatorVault as &kibble.Vault
 
@@ -387,8 +294,6 @@ pub contract Auction {
             let amount = self.currentPrice * cutPercentage / 100
             let beneficiaryCut <- bidVaultRef.withdraw(amount:amount )
 
-            // Not understood this event
-            emit MarketplaceEarned(amount: amount, owner: Curator.curatorAddress)
             curatorVaultRef.deposit(from: <- beneficiaryCut)
 
             Curator.sendNFT(self.recipientCollectionCap!)
@@ -398,10 +303,38 @@ pub contract Auction {
             
             emit auctionSettled(tokenID: self.auctionID, price: self.currentPrice)
         }
+
+        // Returns whether auction is expired or not
+        pub fun isAuctionExpired() : Bool {
+            let timeRemaining= self.timeRemaining()
+            return AuctionItem.timeRemaining() < Fix64(0.0)
+        }
+
+        // 
+        pub fun timeRemaining() : Fix64 {
+            return Fix64(self.auctionLength) - Fix64(getCurrentBlock.timestamp())
+        }
+
+        // Returns the status of this Auction
+        pub fun getAuctionStatus() :AuctionStatus {
+
+            return AuctionStatus(
+                tokenID: self.tokenID, 
+                auctionID: self.auctionID,
+                currentPrice: self.currentPrice, 
+                minimumBidIncrement: self.minimumBidIncrement, 
+                timeRemaining: self.timeRemaining(), 
+                active: !self.auctionCompleted  && !self.isAuctionExpired(), 
+                completed: self.auctionCompleted, 
+                startTime: Fix64(self.startTime),
+                endTime: Fix64(self.startTime+self.auctionLength),
+                minNextBid: self.minNextBid(),
+                expired: self.isAuctionExpired()
+            )
+        }
         
         init (
             tokenID : UInt256, 
-            NFT: @KittyItems.NFT?, 
             startPrice: UFix64,  
             startTime: UFix64, 
             minimumBidIncrement: UFix64, 
@@ -411,8 +344,6 @@ pub contract Auction {
             curatorFeePercentage : UInt64
         ) {
             self.numberOfBids = (0 as UInt64)
-            self.tokenID = tokenID 
-            self.NFT <- NFT
             Auction.totalAuctions = Auction.totalAuctions + (1 as UInt64)
             self.auctionID = Auction.totalAuctions
             self.minimumBidIncrement = minimumBidIncrement
@@ -426,6 +357,38 @@ pub contract Auction {
             self.ownerCollectionCap = ownerCollectionCap
             self.ownerVaultCap = ownerVaultCap
             self.curatorFeePercentage = curatorFeePercentage
+        }
+    }
+
+    pub struct AuctionStatus {
+        pub let tokenID: UInt64?
+        pub var auctionID : UInt64
+        pub let currentPrice : UFix64 
+        pub let minimumBidIncrement : UFix64
+        pub let timeRemaining : Fix64
+        pub var active : Bool
+        pub var completed: Bool 
+        pub let startTime : Fix64
+        pub let endTime : Fix64
+
+        init(
+            tokenID: UInt64?, 
+            auctionID : UInt64,
+            currentPrice : UFix64,  
+            minimumBidIncrement : UFix64, 
+            timeRemaining : Fix64, 
+            endTime : Fix64, 
+            startTime : Fix64, 
+        ) {
+            self.tokenID = tokenID
+            self.auctionID = auctionID
+            self.currentPrice = currentPrice
+            self.minimumBidIncrement = minimumBidIncrement
+            self.timeRemaining = timeRemaining
+            self.endTime = endTime
+            self.startTime = startTime
+            self.active = false
+            self.completed = false
         }
     }
 
@@ -446,7 +409,7 @@ pub contract Auction {
 
     // Creates new Curator
     pub fun createNewCurator () : @Curator {
-        return <- create Curator(curatorAddress : Address?, curatorPercent : UFix64)
+        return <- create Curator(curatorAddress : Address, curatorPercent : UFix64)
     }
     
     init () {
