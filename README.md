@@ -1,8 +1,4 @@
-<p align="center">
-    <a href="http://kitty-items-flow-testnet.herokuapp.com/">
-        <img width="400" src="kitty-items-banner.png" />
-    </a>
-</p>
+# Kitty Auction House
 
 👋 Welcome! This is an Auction House for Kitty Items NFT Marketplace.
 
